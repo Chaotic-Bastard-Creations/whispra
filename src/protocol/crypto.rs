@@ -4,7 +4,7 @@ use aes_gcm::{
 };
 use anyhow::{Context, Result};
 
-pub fn encrypt_message(message: &str) -> Result<()> {
+pub fn encrypt_message(message: &str) -> anyhow::Result<String> {
     let _key = Aes256Gcm::generate_key(OsRng);
 
     let key_bytes: &[u8; 32] = &[42; 32];
@@ -26,8 +26,5 @@ pub fn encrypt_message(message: &str) -> Result<()> {
     let plaintext_str = std::str::from_utf8(&plaintext)
         .context("Failed to parse decrypted bytes as valid UTF-8")?;
 
-    println!("ENCRYPTED: {}", ciphertext_hex);
-    println!("DECRYPTED: {}", plaintext_str);
-
-    Ok(())
+    Ok(ciphertext_hex)
 }
