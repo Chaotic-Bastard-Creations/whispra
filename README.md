@@ -31,13 +31,4 @@
 | `docs/` folder          | Documentation                        | Medium   |
 | `SECURITY.md`           | Security policy                      | Medium   |
 
-###  Extra Professional Touches
-- Add **GitHub Sponsors** button
-- Create a clean **logo** in the repo (in `/assets` or `/logo`)
-- Add badges row (stars, license, language, etc.)
-- Use **GitHub Projects** for Roadmap (public)
-- Enable **Discussions** tab
-- Write proper **Releases** when you tag versions
-- Add a `FUNDING.yml` file
-
 ---
