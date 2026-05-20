@@ -6,8 +6,10 @@ use axum::{
     routing::get,
 };
 
+use crate::protocol::crypto;
+
 async fn websocket_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_failed_upgrade(|error| println!("Err upg webs: {}", error))
+    ws.on_failed_upgrade(|_| println!("Internal server error"))
         .on_upgrade(handle_socket)
 }
 
@@ -15,40 +17,25 @@ async fn handle_socket(mut socket: WebSocket) {
     while let Some(msg) = socket.recv().await {
         if let Ok(msg) = msg {
             match msg {
-                Message::Text(utf8_bytes) => {
-                    println!("Text received: {}", utf8_bytes);
-                    let result = socket
-                        .send(Message::Text(
-                            format!("Echo back text: {}", utf8_bytes).into(),
-                        ))
-                        .await;
-                    if let Err(error) = result {
-                        println!("Error sending: {}", error);
-                        send_close_message(socket, 1011, &format!("Error occured: {}", error))
-                            .await;
+                Message::Text(utf8_bytes) => match crypto::encrypt_message(&utf8_bytes) {
+                    Ok(ciphertext_hex) => {
+                        let response_msg = Message::Text(ciphertext_hex.into());
+
+                        if let Err(_) = socket.send(response_msg).await {
+                            send_close_message(socket, 1011, "Internal server error").await;
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        send_close_message(socket, 1011, "Internal cryptographic error").await;
                         break;
                     }
-                }
-                Message::Binary(bytes) => {
-                    println!("Received bytes of length: {}", bytes.len());
-                    let result = socket
-                        .send(Message::Text(
-                            format!("Received bytes of length: {}", bytes.len()).into(),
-                        ))
-                        .await;
-                    if let Err(error) = result {
-                        println!("Error sending: {}", error);
-                        send_close_message(socket, 1011, &format!("Error occured: {}", error))
-                            .await;
-                        break;
-                    }
-                }
+                },
                 _ => {}
             }
         } else {
-            let error = msg.err().unwrap();
-            println!("Error receiving message: {:?}", error);
-            send_close_message(socket, 1011, &format!("Error occured: {}", error)).await;
+            let _ = msg.err().unwrap();
+            send_close_message(socket, 1011, "Internal server error").await;
             break;
         }
     }
@@ -63,8 +50,7 @@ async fn send_close_message(mut socket: WebSocket, code: u16, reason: &str) {
         .await;
 }
 
-#[tokio::main]
-async fn start_server() -> anyhow::Result<()> {
+pub async fn start_server() -> anyhow::Result<()> {
     let app = Router::new().route("/web_socket", get(websocket_handler));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
