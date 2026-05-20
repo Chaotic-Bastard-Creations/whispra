@@ -4,7 +4,7 @@ use aes_gcm::{
 };
 use anyhow::{Context, Result};
 
-pub fn encrypt_message() -> Result<()> {
+pub fn encrypt_message(message: &str) -> Result<()> {
     let _key = Aes256Gcm::generate_key(OsRng);
 
     let key_bytes: &[u8; 32] = &[42; 32];
@@ -14,7 +14,7 @@ pub fn encrypt_message() -> Result<()> {
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
 
     let ciphertext = cipher
-        .encrypt(&nonce, b"plaintext message".as_ref())
+        .encrypt(&nonce, message.as_bytes().as_ref())
         .map_err(|e| anyhow::anyhow!("Encryption failed: {:?}", e))?;
 
     let plaintext = cipher

@@ -1,8 +1,10 @@
 use whispra::connections::server;
-use whispra::encryption::aes;
+use whispra::protocol::crypto;
+use whispra::protocol::envelope;
 
 fn main() {
     println!("Start server.");
     //server::start_sever();
-    aes::encrypt_message();
+    let _ = crypto::encrypt_message("test");
+    let _ = envelope::emp();
 }

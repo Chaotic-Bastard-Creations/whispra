@@ -1,5 +1,6 @@
-pub mod encryption {
-    pub mod aes;
+pub mod protocol {
+    pub mod crypto;
+    pub mod envelope;
 }
 
 pub mod connections {
