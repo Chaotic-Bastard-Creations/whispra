@@ -7,13 +7,11 @@ use axum::{
 };
 
 async fn websocket_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_failed_upgrade(|error| println!("Err upg webs: {}", err))
+    ws.on_failed_upgrade(|error| println!("Err upg webs: {}", error))
         .on_upgrade(handle_socket)
 }
 
-
 async fn handle_socket(mut socket: WebSocket) {
-    // Returns `None` if the stream has closed.
     while let Some(msg) = socket.recv().await {
         if let Ok(msg) = msg {
             match msg {
@@ -45,11 +43,6 @@ async fn handle_socket(mut socket: WebSocket) {
                         break;
                     }
                 }
-                // Close, Ping, Pong will be handled automatically
-                // Message::Close
-                // After receiving a close frame, axum will automatically respond with a close frame if necessary (you do not have to deal with this yourself).
-                // After sending a close frame, you may still read messages, but attempts to send another message will error.
-                // Since no further messages will be received, you may either do nothing or explicitly drop the connection.
                 _ => {}
             }
         } else {
@@ -70,9 +63,8 @@ async fn send_close_message(mut socket: WebSocket, code: u16, reason: &str) {
         .await;
 }
 
-
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn start_server() -> anyhow::Result<()> {
     let app = Router::new().route("/web_socket", get(websocket_handler));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
