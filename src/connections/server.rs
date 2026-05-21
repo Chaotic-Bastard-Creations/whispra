@@ -11,13 +11,17 @@ use tokio::net::{TcpListener, TcpStream};
 type Board = Arc<DashMap<[u8; SLOT_ID_LEN], Box<[u8; CELL_SIZE]>>>;
 
 pub async fn start_server() -> Result<()> {
+    start_server_on("0.0.0.0:3000").await
+}
+
+pub async fn start_server_on(listen: &str) -> Result<()> {
     let key_path = std::env::var("WHISPRA_KEY").unwrap_or_else(|_| "whispra_server_key".into());
     let identity = ServerIdentity::load_or_generate(&key_path)?;
     println!("public key (pin this in clients): {}", identity.public_hex());
 
     let board: Board = Arc::new(DashMap::new());
-    let listener = TcpListener::bind("127.0.0.1:3000").await?;
-    println!("whispra-server listening on 127.0.0.1:3000");
+    let listener = TcpListener::bind(listen).await?;
+    println!("whispra-server listening on {listen}");
 
     loop {
         let (stream, addr) = listener.accept().await?;

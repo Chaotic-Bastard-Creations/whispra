@@ -49,11 +49,13 @@ cargo build --bin whispra-bridge --bin whispra-server
 cargo run --bin whispra-server
 ```
 
+By default the server listens on `0.0.0.0:3000`, suitable for the public edge at `199.91.221.109:3000`. For local-only testing, pass `--listen 127.0.0.1:3000`.
+
 ### Start the bridge
 
 ```sh
 cargo run --bin whispra-bridge -- \
-  --upstream 127.0.0.1:3000 \
+  --upstream 199.91.221.109:3000 \
   --upstream-key <64-hex-char server static public key> \
   --listen 127.0.0.1:7000
 ```
@@ -68,6 +70,11 @@ The bridge completes a Noise NK handshake with the upstream server, starts the e
 | `POST` | `/send`     | `{"to":"alice","message":"hello"}`                     | Queue a message for the next epoch PUT.  |
 | `GET`  | `/contacts` | —                                                      | List contacts (name, role, counters).    |
 | `GET`  | `/status`   | —                                                      | `{"connected":true,"contact_count":N}`   |
+| `GET`  | `/metrics`  | —                                                      | Bandwidth, epoch, and uptime snapshot.   |
+| `GET`  | `/connection` | —                                                    | Current edge name, address, and server pubkey. |
+| `GET`  | `/runtime-stats` | —                                                 | Runtime privacy counters, all zero by design. |
+| `GET`  | `/build-info` | —                                                     | Bridge build profile.                    |
+| `GET`  | `/network_probe` | —                                                | TCP-connect latency check to `1.1.1.1:443`. |
 | `POST` | `/quit`     | —                                                      | Graceful shutdown.                       |
 
 Error responses: `{"error":"…"}` with an appropriate HTTP status code.

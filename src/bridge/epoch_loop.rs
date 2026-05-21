@@ -23,10 +23,25 @@ pub async fn run(state: AppState) {
     loop {
         ticker.tick().await;
         let epoch = Epoch::now();
-        if let Err(e) = tick(epoch, &state, &decoy_key).await {
-            eprintln!("epoch loop error: {e}");
+        state.metrics.set_epoch(epoch.0);
+        match tick(epoch, &state, &decoy_key).await {
+            Ok(()) => state.set_connected(true),
+            Err(e) => {
+                state.set_connected(false);
+                eprintln!("epoch loop error: {e}");
+                if let Err(reconnect_error) = reconnect(&state).await {
+                    eprintln!("upstream reconnect failed: {reconnect_error}");
+                }
+            }
         }
     }
+}
+
+async fn reconnect(state: &AppState) -> anyhow::Result<()> {
+    let mut conn = state.conn.lock().await;
+    conn.reconnect().await?;
+    state.set_connected(true);
+    Ok(())
 }
 
 struct RecvPlan {
@@ -93,12 +108,9 @@ async fn tick(epoch: Epoch, state: &AppState, decoy_key: &DecoyKey) -> anyhow::R
         (send, recv)
     };
 
-    if let Some(ref si) = send_info {
-        if let Some(c) = state.contacts.lock().await.get_mut(&si.contact_name) {
-            c.send_counter = si.next_counter;
-        }
-    }
-
+    let sent_counter_update = send_info
+        .as_ref()
+        .map(|si| (si.contact_name.clone(), si.next_counter));
 
     let (put_slot, put_cell) = match send_info {
         Some(si) => (si.slot, si.cell),
@@ -109,7 +121,6 @@ async fn tick(epoch: Epoch, state: &AppState, decoy_key: &DecoyKey) -> anyhow::R
             (slot, cell)
         }
     };
-
 
     let real_count = recv_plans.len();
     enum ReadSlot {
@@ -123,27 +134,45 @@ async fn tick(epoch: Epoch, state: &AppState, decoy_key: &DecoyKey) -> anyhow::R
     }
     plan.shuffle(&mut rand::rng());
 
-
     let hits: Vec<(String, [u8; 32], Box<[u8; crate::CELL_SIZE]>)> = {
         let mut conn = state.conn.lock().await;
-        conn.put(put_slot, put_cell).await?;
+        let sample = match conn.put(put_slot, put_cell).await {
+            Ok(sample) => sample,
+            Err(e) => {
+                if sent_counter_update.is_some() {
+                    if let Some(msg) = outgoing_msg {
+                        state.outgoing.lock().await.push_front(msg);
+                    }
+                }
+                return Err(e);
+            }
+        };
+        state.record_io(sample);
+
+        if let Some((contact_name, next_counter)) = &sent_counter_update {
+            if let Some(c) = state.contacts.lock().await.get_mut(contact_name) {
+                c.send_counter = *next_counter;
+            }
+        }
 
         let mut hits = Vec::new();
         for entry in plan {
             match entry {
-                ReadSlot::Real(rp) => match conn.get(rp.slot).await {
-                    Ok(Some(cell)) => hits.push((rp.contact_name, rp.key, cell)),
-                    Ok(None) => {}
-                    Err(e) => eprintln!("GET error for {}: {e}", rp.contact_name),
-                },
+                ReadSlot::Real(rp) => {
+                    let (cell, sample) = conn.get(rp.slot).await?;
+                    state.record_io(sample);
+                    if let Some(cell) = cell {
+                        hits.push((rp.contact_name, rp.key, cell));
+                    }
+                }
                 ReadSlot::Decoy(slot) => {
-                    let _ = conn.get(slot).await;
+                    let (_, sample) = conn.get(slot).await?;
+                    state.record_io(sample);
                 }
             }
         }
         hits
     };
-
 
     for (name, key, cell) in hits {
         if let Ok(opened) = cell::open(&key, &cell) {

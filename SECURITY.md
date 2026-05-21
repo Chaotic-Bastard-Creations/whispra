@@ -1,5 +1,19 @@
 # Security Policy
 
+<!-- whispra-security-panel:start -->
+## Defends against
+
+- TODO: project-owner text covering passive observers, full server compromise, and future compromise of one endpoint with respect to past slot IDs via hourly slot-key ratchet.
+
+## Does not defend against
+
+- TODO: project-owner text covering simultaneous endpoint compromise, identity leaks in message content, detection that you use Whispra, endpoint malware, and physical access to an unlocked device.
+
+## Trade-offs
+
+- TODO: project-owner text covering the 30s delivery TTL, no group chat in v1, 32-contact cap per device, constant upstream bandwidth cost, and out-of-band pairing secret exchange.
+<!-- whispra-security-panel:end -->
+
 ## Supported Versions
 
 Whispra is currently in **active development** and has not yet released a stable version.

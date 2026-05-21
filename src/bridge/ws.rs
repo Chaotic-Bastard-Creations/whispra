@@ -4,7 +4,7 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
     },
-    http::StatusCode,
+    http::{header::AUTHORIZATION, HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
 };
@@ -20,12 +20,20 @@ pub struct WsAuth {
 pub async fn ws_handler(
     State(state): State<AppState>,
     Query(auth): Query<WsAuth>,
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    if auth.token.as_deref() != Some(state.token.as_ref()) {
+    let query_ok = auth.token.as_deref() == Some(state.token.as_ref());
+    let bearer_ok = headers
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v == format!("Bearer {}", state.token.as_ref()))
+        .unwrap_or(false);
+
+    if !query_ok && !bearer_ok {
         return (
             StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error": "missing or invalid ?token= query parameter"})),
+            Json(serde_json::json!({"error": "missing or invalid bearer token"})),
         )
             .into_response();
     }
@@ -35,8 +43,21 @@ pub async fn ws_handler(
 async fn handle_socket(socket: WebSocket, state: AppState) {
     let mut rx = state.events.subscribe();
     let (mut sender, mut receiver) = socket.split();
+    let initial_status = Event::Status {
+        connected: state.connected(),
+    };
 
     let send_task = tokio::spawn(async move {
+        if let Ok(json) = serde_json::to_string(&initial_status) {
+            if sender
+                .send(Message::Text(axum::extract::ws::Utf8Bytes::from(json)))
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+
         loop {
             match rx.recv().await {
                 Ok(event) => {

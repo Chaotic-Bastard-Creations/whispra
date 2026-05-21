@@ -11,6 +11,9 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
+use tokio::net::TcpStream;
+use tokio::time::{timeout, Duration};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 #[derive(Deserialize)]
@@ -40,6 +43,27 @@ struct StatusResponse {
     contact_count: usize,
 }
 
+#[derive(Serialize)]
+struct NetworkProbeResponse {
+    target: &'static str,
+    transport: &'static str,
+    latency_ms: Option<u64>,
+    ok: bool,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ConnectionResponse {
+    edge_name: String,
+    address: String,
+    server_pubkey_hex: String,
+}
+
+#[derive(Serialize)]
+struct BuildInfoResponse {
+    build_profile: &'static str,
+}
+
 pub async fn bearer_auth(
     State(state): State<AppState>,
     request: Request<axum::body::Body>,
@@ -64,10 +88,7 @@ pub async fn bearer_auth(
     }
 }
 
-async fn pair(
-    State(state): State<AppState>,
-    Json(req): Json<PairRequest>,
-) -> impl IntoResponse {
+async fn pair(State(state): State<AppState>, Json(req): Json<PairRequest>) -> impl IntoResponse {
     let role = match req.role.as_str() {
         "initiator" => Role::Initiator,
         "responder" => Role::Responder,
@@ -124,9 +145,66 @@ async fn contacts(State(state): State<AppState>) -> impl IntoResponse {
 async fn status(State(state): State<AppState>) -> impl IntoResponse {
     let count = state.contacts.lock().await.len();
     Json(StatusResponse {
-        connected: true,
+        connected: state.connected(),
         contact_count: count,
     })
+}
+
+async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.metrics_snapshot())
+}
+
+async fn connection(State(state): State<AppState>) -> impl IntoResponse {
+    let conn = state.conn.lock().await;
+    Json(ConnectionResponse {
+        edge_name: state.edge_name.to_string(),
+        address: conn.upstream_addr().to_string(),
+        server_pubkey_hex: conn.server_public_key_hex(),
+    })
+}
+
+async fn runtime_stats(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.runtime_stats_snapshot())
+}
+
+async fn build_info() -> impl IntoResponse {
+    Json(BuildInfoResponse {
+        build_profile: if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        },
+    })
+}
+
+async fn network_probe() -> impl IntoResponse {
+    const TARGET: &str = "1.1.1.1:443";
+    let started = Instant::now();
+    let result = timeout(Duration::from_millis(1500), TcpStream::connect(TARGET)).await;
+
+    match result {
+        Ok(Ok(_stream)) => Json(NetworkProbeResponse {
+            target: TARGET,
+            transport: "tcp_connect",
+            latency_ms: Some(started.elapsed().as_millis() as u64),
+            ok: true,
+            error: None,
+        }),
+        Ok(Err(e)) => Json(NetworkProbeResponse {
+            target: TARGET,
+            transport: "tcp_connect",
+            latency_ms: None,
+            ok: false,
+            error: Some(e.to_string()),
+        }),
+        Err(_) => Json(NetworkProbeResponse {
+            target: TARGET,
+            transport: "tcp_connect",
+            latency_ms: None,
+            ok: false,
+            error: Some("timed out after 1500ms".to_string()),
+        }),
+    }
 }
 
 async fn quit() -> impl IntoResponse {
@@ -139,17 +217,15 @@ async fn quit() -> impl IntoResponse {
 
 fn localhost_only() -> CorsLayer {
     CorsLayer::new()
-        .allow_origin(AllowOrigin::predicate(
-            |origin: &HeaderValue, _| -> bool {
-                let Ok(s) = std::str::from_utf8(origin.as_bytes()) else {
-                    return false;
-                };
-                s == "http://localhost"
-                    || s.starts_with("http://localhost:")
-                    || s == "http://127.0.0.1"
-                    || s.starts_with("http://127.0.0.1:")
-            },
-        ))
+        .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| -> bool {
+            let Ok(s) = std::str::from_utf8(origin.as_bytes()) else {
+                return false;
+            };
+            s == "http://localhost"
+                || s.starts_with("http://localhost:")
+                || s == "http://127.0.0.1"
+                || s.starts_with("http://127.0.0.1:")
+        }))
         .allow_methods(tower_http::cors::Any)
         .allow_headers(tower_http::cors::Any)
 }
@@ -160,6 +236,11 @@ pub fn router(state: AppState) -> Router {
         .route("/send", post(send_message))
         .route("/contacts", get(contacts))
         .route("/status", get(status))
+        .route("/metrics", get(metrics))
+        .route("/connection", get(connection))
+        .route("/runtime-stats", get(runtime_stats))
+        .route("/build-info", get(build_info))
+        .route("/network_probe", get(network_probe))
         .route("/quit", post(quit))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),

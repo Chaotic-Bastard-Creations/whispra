@@ -3,17 +3,25 @@ use whispra::bridge::conn::Connection;
 use whispra::bridge::state::AppState;
 use whispra::bridge::{epoch_loop, http};
 
+const DEFAULT_UPSTREAM: &str = "199.91.221.109:3000";
+
 #[derive(Parser)]
 #[command(about = "Local HTTP/WebSocket bridge between the browser and a Whispra server")]
 struct Args {
-    #[arg(long, default_value = "127.0.0.1:3000")]
+    #[arg(long, default_value = DEFAULT_UPSTREAM)]
     upstream: String,
 
     #[arg(long)]
     upstream_key: String,
 
+    #[arg(long)]
+    token: Option<String>,
+
     #[arg(long, default_value = "127.0.0.1:7000")]
     listen: String,
+
+    #[arg(long, default_value = "eu-edge-01")]
+    edge_name: String,
 }
 
 #[tokio::main]
@@ -29,13 +37,16 @@ async fn main() -> anyhow::Result<()> {
     server_pk.copy_from_slice(&pk_bytes);
 
     println!("Connecting to upstream {}...", args.upstream);
-    let conn = Connection::connect(&args.upstream, &server_pk).await?;
+    let conn = Connection::connect(args.upstream.clone(), server_pk).await?;
     println!("Noise NK handshake complete.");
 
-    let token = hex::encode(rand::random::<[u8; 16]>());
+    let token = args
+        .token
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| hex::encode(rand::random::<[u8; 16]>()));
     println!("bridge auth token: {token}");
 
-    let state = AppState::new(conn, token);
+    let state = AppState::new(conn, token, args.edge_name);
 
     tokio::spawn(epoch_loop::run(state.clone()));
 

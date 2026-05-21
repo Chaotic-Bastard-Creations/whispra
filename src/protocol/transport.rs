@@ -2,11 +2,13 @@
 //!
 //! Noise pattern:
 //!
-//!     Noise_NK_25519_ChaChaPoly_SHA256
-//!     <- s
-//!     ...
-//!     -> e, es
-//!     <- e, ee
+//! ```text
+//! Noise_NK_25519_ChaChaPoly_SHA256
+//! <- s
+//! ...
+//! -> e, es
+//! <- e, ee
+//! ```
 //!
 //! The server has a static X25519 key pinned by the client. The
 //! client has no static key — it is anonymous to the server at the
@@ -26,7 +28,9 @@
 //!
 //! Each transport-mode frame on the wire is length-prefixed:
 //!
-//!     [ length: u32 BE ][ noise-encrypted payload ]
+//! ```text
+//! [ length: u32 BE ][ noise-encrypted payload ]
+//! ```
 //!
 //! The length is the encrypted payload length (which is the plaintext
 //! length + 16 bytes for the Poly1305 tag).
@@ -96,6 +100,14 @@ impl NoiseTransport {
     }
 
     pub async fn send(&mut self, stream: &mut TcpStream, plaintext: &[u8]) -> Result<()> {
+        self.send_counted(stream, plaintext).await.map(|_| ())
+    }
+
+    pub async fn send_counted(
+        &mut self,
+        stream: &mut TcpStream,
+        plaintext: &[u8],
+    ) -> Result<usize> {
         if plaintext.len() + 16 > MAX_NOISE_FRAME {
             return Err(anyhow!("plaintext too large for one Noise frame"));
         }
@@ -104,19 +116,23 @@ impl NoiseTransport {
             .state
             .write_message(plaintext, &mut buf)
             .context("Noise transport write")?;
-        write_frame(stream, &buf[..n]).await
+        write_frame_counted(stream, &buf[..n]).await
     }
 
     pub async fn recv(&mut self, stream: &mut TcpStream) -> Result<Vec<u8>> {
+        self.recv_counted(stream).await.map(|(pt, _)| pt)
+    }
+
+    pub async fn recv_counted(&mut self, stream: &mut TcpStream) -> Result<(Vec<u8>, usize)> {
         let mut buf = [0u8; MAX_NOISE_FRAME];
-        let ct = read_frame(stream, &mut buf).await?;
+        let (ct, wire_bytes) = read_frame_counted(stream, &mut buf).await?;
         let mut pt = vec![0u8; ct.len()];
         let n = self
             .state
             .read_message(ct, &mut pt)
             .context("Noise transport read")?;
         pt.truncate(n);
-        Ok(pt)
+        Ok((pt, wire_bytes))
     }
 }
 
@@ -124,6 +140,15 @@ async fn read_frame<'a>(
     stream: &mut TcpStream,
     buf: &'a mut [u8; MAX_NOISE_FRAME],
 ) -> Result<&'a [u8]> {
+    read_frame_counted(stream, buf)
+        .await
+        .map(|(payload, _)| payload)
+}
+
+async fn read_frame_counted<'a>(
+    stream: &mut TcpStream,
+    buf: &'a mut [u8; MAX_NOISE_FRAME],
+) -> Result<(&'a [u8], usize)> {
     let mut len_bytes = [0u8; 4];
     stream
         .read_exact(&mut len_bytes)
@@ -137,10 +162,14 @@ async fn read_frame<'a>(
         .read_exact(&mut buf[..len])
         .await
         .context("reading frame body")?;
-    Ok(&buf[..len])
+    Ok((&buf[..len], 4 + len))
 }
 
 async fn write_frame(stream: &mut TcpStream, payload: &[u8]) -> Result<()> {
+    write_frame_counted(stream, payload).await.map(|_| ())
+}
+
+async fn write_frame_counted(stream: &mut TcpStream, payload: &[u8]) -> Result<usize> {
     let len = payload.len() as u32;
     stream
         .write_all(&len.to_be_bytes())
@@ -150,5 +179,5 @@ async fn write_frame(stream: &mut TcpStream, payload: &[u8]) -> Result<()> {
         .write_all(payload)
         .await
         .context("writing frame body")?;
-    Ok(())
+    Ok(4 + payload.len())
 }
