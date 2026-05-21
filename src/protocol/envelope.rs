@@ -1,16 +1,9 @@
 use dashmap::DashMap;
 use rand::distr::Alphanumeric;
-use rand::Rng;
 use rand::RngExt;
-use serde_json::json;
 use std::sync::Arc;
-use std::time::UNIX_EPOCH;
-use std::time::{Duration, SystemTime};
 //use whispra::protocol::crypto;
 
-// set a timer, the user should get a new empheral token each 60 seconds
-// for maximum anonymization and to make it very hard to track
-//
 pub type SharedMailboxMap =
     Arc<DashMap<String, tokio::sync::mpsc::Sender<axum::extract::ws::Message>>>;
 
@@ -23,4 +16,4 @@ pub fn gen_mailbox_token() -> String {
     empheral_token
 }
 
-pub fn emp(payload: &str) {}
+pub fn emp(_payload: &str) {}
